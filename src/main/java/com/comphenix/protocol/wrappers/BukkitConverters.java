@@ -25,6 +25,7 @@ import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
@@ -38,10 +39,14 @@ import com.comphenix.protocol.reflect.FieldAccessException;
 import com.comphenix.protocol.reflect.FuzzyReflection;
 import com.comphenix.protocol.reflect.StructureModifier;
 import com.comphenix.protocol.reflect.accessors.Accessors;
+import com.comphenix.protocol.reflect.accessors.ConstructorAccessor;
 import com.comphenix.protocol.reflect.accessors.FieldAccessor;
 import com.comphenix.protocol.reflect.accessors.MethodAccessor;
 import com.comphenix.protocol.reflect.fuzzy.FuzzyMethodContract;
 import com.comphenix.protocol.utility.MinecraftReflection;
+import com.comphenix.protocol.utility.MinecraftVersion;
+import com.comphenix.protocol.wrappers.EnumWrappers.Dimension;
+import com.comphenix.protocol.wrappers.EnumWrappers.FauxEnumConverter;
 import com.comphenix.protocol.wrappers.nbt.NbtBase;
 import com.comphenix.protocol.wrappers.nbt.NbtFactory;
 import com.google.common.base.Objects;
@@ -49,20 +54,20 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 
-import org.bukkit.Material;
-import org.bukkit.Sound;
-import org.bukkit.World;
-import org.bukkit.WorldType;
+import org.bukkit.*;
 import org.bukkit.advancement.Advancement;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.MerchantRecipe;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
-import static com.comphenix.protocol.utility.MinecraftReflection.*;
-import static com.comphenix.protocol.wrappers.Converters.*;
+import static com.comphenix.protocol.utility.MinecraftReflection.getCraftBukkitClass;
+import static com.comphenix.protocol.utility.MinecraftReflection.getMinecraftClass;
+import static com.comphenix.protocol.wrappers.Converters.handle;
+import static com.comphenix.protocol.wrappers.Converters.ignoreNull;
 
 /**
  * Contains several useful equivalent converters for normal Bukkit types.
@@ -314,6 +319,36 @@ public class BukkitConverters {
 		});
 	}
 
+	@SuppressWarnings("rawtypes")
+	public static <A, B> EquivalentConverter<Pair<A, B>> getPairConverter(final EquivalentConverter<A> firstConverter,
+																		  final EquivalentConverter<B> secondConverter) {
+		return ignoreNull(new EquivalentConverter<Pair<A, B>>() {
+			@Override
+			public Object getGeneric(Pair<A, B> specific) {
+				Object first = firstConverter.getGeneric(specific.getFirst());
+				Object second = secondConverter.getGeneric(specific.getSecond());
+
+				return new com.mojang.datafixers.util.Pair(first, second);
+			}
+
+			@Override
+			public Pair<A, B> getSpecific(Object generic) {
+				com.mojang.datafixers.util.Pair mjPair = (com.mojang.datafixers.util.Pair) generic;
+
+				A first = firstConverter.getSpecific(mjPair.getFirst());
+				B second = secondConverter.getSpecific(mjPair.getSecond());
+
+				return new Pair(first, second);
+			}
+
+			@Override
+			public Class<Pair<A, B>> getSpecificType() {
+				Class<?> dummy = Pair.class;
+				return (Class<Pair<A, B>>) dummy;
+			}
+		});
+	}
+
 	/**
 	 * @deprecated While this solution is not as abhorrent as I had imagined, I still highly recommend switching to the
 	 * new conversion API.
@@ -450,7 +485,7 @@ public class BukkitConverters {
 	 * @return Wrapped game profile converter.
 	 */
 	public static EquivalentConverter<WrappedGameProfile> getWrappedGameProfileConverter() {
-		return ignoreNull(handle(WrappedGameProfile::getHandle, WrappedGameProfile::fromHandle));
+		return ignoreNull(handle(WrappedGameProfile::getHandle, WrappedGameProfile::fromHandle, WrappedGameProfile.class));
 	}
 	
 	/**
@@ -458,7 +493,7 @@ public class BukkitConverters {
 	 * @return Wrapped chat component.
 	 */
 	public static EquivalentConverter<WrappedChatComponent> getWrappedChatComponentConverter() {
-		return ignoreNull(handle(WrappedChatComponent::getHandle, WrappedChatComponent::fromHandle));
+		return ignoreNull(handle(WrappedChatComponent::getHandle, WrappedChatComponent::fromHandle, WrappedChatComponent.class));
 	}
 	
 	/**
@@ -466,7 +501,7 @@ public class BukkitConverters {
 	 * @return Wrapped block data.
 	 */
 	public static EquivalentConverter<WrappedBlockData> getWrappedBlockDataConverter() {
-		return ignoreNull(handle(WrappedBlockData::getHandle, WrappedBlockData::fromHandle));
+		return ignoreNull(handle(WrappedBlockData::getHandle, WrappedBlockData::fromHandle, WrappedBlockData.class));
 	}
 	
 	/**
@@ -474,7 +509,7 @@ public class BukkitConverters {
 	 * @return Wrapped attribute snapshot converter.
 	 */
 	public static EquivalentConverter<WrappedAttribute> getWrappedAttributeConverter() {
-		return ignoreNull(handle(WrappedAttribute::getHandle, WrappedAttribute::fromHandle));
+		return ignoreNull(handle(WrappedAttribute::getHandle, WrappedAttribute::fromHandle, WrappedAttribute.class));
 	}
 	
 	/**
@@ -733,7 +768,7 @@ public class BukkitConverters {
 	 * @return Server ping converter.
 	 */
 	public static EquivalentConverter<WrappedServerPing> getWrappedServerPingConverter() {
-		return ignoreNull(handle(WrappedServerPing::getHandle, WrappedServerPing::fromHandle));
+		return ignoreNull(handle(WrappedServerPing::getHandle, WrappedServerPing::fromHandle, WrappedServerPing.class));
 	}
 	
 	/**
@@ -741,7 +776,7 @@ public class BukkitConverters {
 	 * @return Statistic converter.
 	 */
 	public static EquivalentConverter<WrappedStatistic> getWrappedStatisticConverter() {
-		return ignoreNull(handle(WrappedStatistic::getHandle, WrappedStatistic::fromHandle));
+		return ignoreNull(handle(WrappedStatistic::getHandle, WrappedStatistic::fromHandle, WrappedStatistic.class));
 	}
 
 	private static MethodAccessor BLOCK_FROM_MATERIAL;
@@ -981,7 +1016,7 @@ public class BukkitConverters {
 	}
 
 	public static EquivalentConverter<WrappedParticle> getParticleConverter() {
-		return ignoreNull(handle(WrappedParticle::getHandle, WrappedParticle::fromHandle));
+		return ignoreNull(handle(WrappedParticle::getHandle, WrappedParticle::fromHandle, WrappedParticle.class));
 	}
 
 	public static EquivalentConverter<Advancement> getAdvancementConverter() {
@@ -1129,48 +1164,250 @@ public class BukkitConverters {
 		});
 	}
 
+	private static Class<?> dimensionManager;
+	private static FauxEnumConverter<Dimension> dimensionConverter;
+	private static FauxEnumConverter<DimensionImpl> dimensionImplConverter;
+
 	private static MethodAccessor dimensionFromId = null;
 	private static MethodAccessor idFromDimension = null;
+
+	private static FieldAccessor worldKeyField = null;
+	private static MethodAccessor getServer = null;
+	private static MethodAccessor getWorldServer = null;
+	private static MethodAccessor getWorld = null;
+
+	public static EquivalentConverter<World> getWorldKeyConverter() {
+		return ignoreNull(new EquivalentConverter<World>() {
+			@Override
+			public Object getGeneric(World specific) {
+				Object nmsWorld = getWorldConverter().getGeneric(specific);
+
+				if (worldKeyField == null) {
+					Class<?> worldClass = MinecraftReflection.getNmsWorldClass();
+					Class<?> resourceKeyClass = MinecraftReflection.getMinecraftClass("ResourceKey");
+
+					FuzzyReflection fuzzy = FuzzyReflection.fromClass(nmsWorld.getClass(), true);
+					worldKeyField = Accessors.getFieldAccessor(fuzzy.getParameterizedField(resourceKeyClass, worldClass));
+				}
+
+				return worldKeyField.get(nmsWorld);
+			}
+
+			@Override
+			public World getSpecific(Object generic) {
+				if (getServer == null) {
+					getServer = Accessors.getMethodAccessor(Bukkit.getServer().getClass(), "getServer");
+				}
+
+				Object server = getServer.invoke(Bukkit.getServer());
+				if (getWorldServer == null) {
+					FuzzyReflection fuzzy = FuzzyReflection.fromClass(server.getClass(), false);
+					getWorldServer = Accessors.getMethodAccessor(fuzzy.getMethod(FuzzyMethodContract
+							.newBuilder()
+							.parameterExactArray(generic.getClass())
+							.returnTypeExact(MinecraftReflection.getWorldServerClass())
+							.build()));
+				}
+
+				Object worldServer = getWorldServer.invoke(server, generic);
+				if (getWorld == null) {
+					getWorld = Accessors.getMethodAccessor(worldServer.getClass(), "getWorld");
+				}
+
+				return (World) getWorld.invoke(worldServer);
+			}
+
+			@Override
+			public Class<World> getSpecificType() {
+				return World.class;
+			}
+		});
+	}
+
+	enum DimensionImpl {
+		OVERWORLD_IMPL(0),
+		THE_NETHER_IMPL(-1),
+		THE_END_IMPL(1);
+
+		int id;
+		DimensionImpl(int id) {
+			this.id = id;
+		}
+
+		static DimensionImpl fromId(int id) {
+			switch (id) {
+				case 0: return OVERWORLD_IMPL;
+				case -1: return THE_NETHER_IMPL;
+				case 1: return THE_END_IMPL;
+				default: throw new IllegalArgumentException("Invalid dimension " + id);
+			}
+		}
+	}
 
 	public static EquivalentConverter<Integer> getDimensionIDConverter() {
 		return ignoreNull(new EquivalentConverter<Integer>() {
 			@Override
 			public Object getGeneric(Integer specific) {
-				if (dimensionFromId == null) {
-					Class<?> clazz = MinecraftReflection.getMinecraftClass("DimensionManager");
-					FuzzyReflection reflection = FuzzyReflection.fromClass(clazz, false);
-					FuzzyMethodContract contract = FuzzyMethodContract
-							.newBuilder()
-							.requireModifier(Modifier.STATIC)
-							.parameterExactType(int.class)
-							.returnTypeExact(clazz)
-							.build();
-					dimensionFromId = Accessors.getMethodAccessor(reflection.getMethod(contract));
+				if (dimensionManager == null) {
+					dimensionManager = MinecraftReflection.getNullableNMS("DimensionManager");
 				}
 
-				return dimensionFromId.invoke(null, specific);
+				if (MinecraftVersion.NETHER_UPDATE_2.atOrAbove()) {
+					if (dimensionImplConverter == null) {
+						dimensionImplConverter = new FauxEnumConverter<>(DimensionImpl.class, dimensionManager);
+					}
+
+					DimensionImpl dimension = DimensionImpl.fromId(specific);
+					return dimensionImplConverter.getGeneric(dimension);
+				} else if (MinecraftVersion.NETHER_UPDATE.atOrAbove()) {
+					if (dimensionConverter == null) {
+						dimensionConverter = new FauxEnumConverter<>(Dimension.class, dimensionManager);
+					}
+
+					Dimension dimension = Dimension.fromId(specific);
+					return dimensionConverter.getGeneric(dimension);
+				} else {
+					if (dimensionFromId == null) {
+						FuzzyReflection reflection = FuzzyReflection.fromClass(dimensionManager, false);
+						FuzzyMethodContract contract = FuzzyMethodContract
+								.newBuilder()
+								.requireModifier(Modifier.STATIC)
+								.parameterExactType(int.class)
+								.returnTypeExact(dimensionManager)
+								.build();
+						dimensionFromId = Accessors.getMethodAccessor(reflection.getMethod(contract));
+					}
+
+					return dimensionFromId.invoke(null, specific);
+				}
 			}
 
 			@Override
 			public Integer getSpecific(Object generic) {
-				if (idFromDimension == null) {
-					Class<?> clazz = MinecraftReflection.getMinecraftClass("DimensionManager");
-					FuzzyReflection reflection = FuzzyReflection.fromClass(clazz, false);
-					FuzzyMethodContract contract = FuzzyMethodContract
-							.newBuilder()
-							.banModifier(Modifier.STATIC)
-							.returnTypeExact(int.class)
-							.parameterCount(0)
-							.build();
-					idFromDimension = Accessors.getMethodAccessor(reflection.getMethod(contract));
+				if (dimensionManager == null) {
+					dimensionManager = MinecraftReflection.getNullableNMS("DimensionManager");
 				}
 
-				return (Integer) idFromDimension.invoke(generic);
+				if (MinecraftVersion.NETHER_UPDATE_2.atOrAbove()) {
+					if (dimensionImplConverter == null) {
+						dimensionImplConverter = new FauxEnumConverter<>(DimensionImpl.class, dimensionManager);
+					}
+
+					DimensionImpl dimension = dimensionImplConverter.getSpecific(generic);
+					return dimension.id;
+				} else if (MinecraftVersion.NETHER_UPDATE.atOrAbove()) {
+					if (dimensionConverter == null) {
+						dimensionConverter = new FauxEnumConverter<>(Dimension.class, dimensionManager);
+					}
+
+					Dimension dimension = dimensionConverter.getSpecific(generic);
+					return dimension.getId();
+				} else {
+					if (idFromDimension == null) {
+						FuzzyReflection reflection = FuzzyReflection.fromClass(dimensionManager, false);
+						FuzzyMethodContract contract = FuzzyMethodContract
+								.newBuilder()
+								.banModifier(Modifier.STATIC)
+								.returnTypeExact(int.class)
+								.parameterCount(0)
+								.build();
+						idFromDimension = Accessors.getMethodAccessor(reflection.getMethod(contract));
+					}
+
+					return (Integer) idFromDimension.invoke(generic);
+				}
 			}
 
 			@Override
 			public Class<Integer> getSpecificType() {
 				return Integer.class;
+			}
+		});
+	}
+	
+	private static ConstructorAccessor merchantRecipeListConstructor = null;
+	private static MethodAccessor bukkitMerchantRecipeToCraft = null;
+	private static MethodAccessor craftMerchantRecipeToNMS = null;
+	private static MethodAccessor nmsMerchantRecipeToBukkit = null;
+	
+	/**
+	 * Creates a converter from a MerchantRecipeList (which is just an ArrayList of MerchantRecipe wrapper)
+	 * to a {@link List} of {@link MerchantRecipe}. Primarily for the packet OPEN_WINDOW_MERCHANT which is present
+	 * in 1.13+.
+	 *
+	 * @return The MerchantRecipeList converter.
+	 */
+	public static EquivalentConverter<List<MerchantRecipe>> getMerchantRecipeListConverter() {
+		return ignoreNull(new EquivalentConverter<List<MerchantRecipe>>() {
+			
+			@Override
+			public Object getGeneric(List<MerchantRecipe> specific) {
+				if (merchantRecipeListConstructor == null) {
+					Class<?> merchantRecipeListClass = MinecraftReflection.getMinecraftClass("MerchantRecipeList");
+					merchantRecipeListConstructor = Accessors.getConstructorAccessor(merchantRecipeListClass);
+					Class<?> craftMerchantRecipeClass = MinecraftReflection.getCraftBukkitClass("inventory.CraftMerchantRecipe");
+					FuzzyReflection reflection = FuzzyReflection.fromClass(craftMerchantRecipeClass, false);
+					bukkitMerchantRecipeToCraft = Accessors.getMethodAccessor(reflection.getMethodByName("fromBukkit"));
+					craftMerchantRecipeToNMS = Accessors.getMethodAccessor(reflection.getMethodByName("toMinecraft"));
+				}
+				return specific.stream().map(recipe -> craftMerchantRecipeToNMS.invoke(bukkitMerchantRecipeToCraft.invoke(null, recipe)))
+						.collect(() -> (List<Object>)merchantRecipeListConstructor.invoke(), List::add, List::addAll);
+			}
+			
+			@Override
+			public List<MerchantRecipe> getSpecific(Object generic) {
+				if (nmsMerchantRecipeToBukkit == null) {
+					Class<?> merchantRecipeClass = MinecraftReflection.getMinecraftClass("MerchantRecipe");
+					FuzzyReflection reflection = FuzzyReflection.fromClass(merchantRecipeClass, false);
+					nmsMerchantRecipeToBukkit = Accessors.getMethodAccessor(reflection.getMethodByName("asBukkit"));
+				}
+				return ((List<Object>)generic).stream().map(o -> (MerchantRecipe)nmsMerchantRecipeToBukkit.invoke(o)).collect(Collectors.toList());
+			}
+			
+			@Override
+			public Class<List<MerchantRecipe>> getSpecificType() {
+				// Damn you Java
+				Class<?> dummy = List.class;
+				return (Class<List<MerchantRecipe>>) dummy;
+			}
+			
+		});
+	}
+
+	private static MethodAccessor sectionPositionCreate;
+	private static Class<?> sectionPositionClass;
+
+	public static EquivalentConverter<BlockPosition> getSectionPositionConverter() {
+		return ignoreNull(new EquivalentConverter<BlockPosition>() {
+			@Override
+			public Object getGeneric(BlockPosition specific) {
+				if (sectionPositionClass == null) {
+					sectionPositionClass = MinecraftReflection.getMinecraftClass("SectionPosition");
+				}
+
+				if (sectionPositionCreate == null) {
+					sectionPositionCreate = Accessors.getMethodAccessor(
+							FuzzyReflection.fromClass(sectionPositionClass).getMethod(FuzzyMethodContract
+									.newBuilder()
+									.requireModifier(Modifier.STATIC)
+									.returnTypeExact(sectionPositionClass)
+									.parameterExactArray(int.class, int.class, int.class)
+									.build())
+					);
+				}
+
+				return sectionPositionCreate.invoke(null, specific.x, specific.y, specific.z);
+			}
+
+			@Override
+			public BlockPosition getSpecific(Object generic) {
+				StructureModifier<Integer> modifier = new StructureModifier<>(generic.getClass()).withTarget(generic).withType(int.class);
+				return new BlockPosition(modifier.readSafely(0), modifier.readSafely(1), modifier.readSafely(2));
+			}
+
+			@Override
+			public Class<BlockPosition> getSpecificType() {
+				return BlockPosition.class;
 			}
 		});
 	}

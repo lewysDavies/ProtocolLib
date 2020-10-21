@@ -1,9 +1,7 @@
 package com.comphenix.protocol.wrappers;
 
 import java.lang.reflect.Field;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.comphenix.protocol.PacketType;
@@ -151,14 +149,23 @@ public abstract class EnumWrappers {
 		ENTITY_DIED
 	}
 
-	public enum PlayerDigType {
+	public enum PlayerDigType implements AliasedEnum{
 		START_DESTROY_BLOCK,
 		ABORT_DESTROY_BLOCK,
 		STOP_DESTROY_BLOCK,
 		DROP_ALL_ITEMS,
 		DROP_ITEM,
 		RELEASE_USE_ITEM,
-		SWAP_HELD_ITEMS
+		SWAP_HELD_ITEMS("SWAP_ITEM_WITH_OFFHAND");
+
+		String[] aliases;
+		PlayerDigType(String... aliases) {
+			this.aliases = aliases;
+		}
+		@Override
+		public String[] getAliases() {
+			return aliases;
+		}
 	}
 
 	public enum PlayerAction implements AliasedEnum {
@@ -400,6 +407,31 @@ public abstract class EnumWrappers {
 		}
 	}
 
+	public enum Dimension {
+		OVERWORLD(0),
+		THE_NETHER(-1),
+		THE_END(1);
+
+		private final int id;
+
+		Dimension(int id) {
+			this.id = id;
+		}
+
+		public int getId() {
+			return this.id;
+		}
+
+		public static Dimension fromId(int id) {
+			switch (id) {
+				case 0: return Dimension.OVERWORLD;
+				case -1: return Dimension.THE_NETHER;
+				case 1: return Dimension.THE_END;
+				default: throw new IllegalArgumentException("Invalid dimension ID: " + id);
+			}
+		}
+	}
+
 	private static Class<?> PROTOCOL_CLASS = null;
 	private static Class<?> CLIENT_COMMAND_CLASS = null;
 	private static Class<?> CHAT_VISIBILITY_CLASS = null;
@@ -425,6 +457,7 @@ public abstract class EnumWrappers {
 	private static boolean INITIALIZED = false;
 	private static Map<Class<?>, EquivalentConverter<?>> FROM_NATIVE = Maps.newHashMap();
 	private static Map<Class<?>, EquivalentConverter<?>> FROM_WRAPPER = Maps.newHashMap();
+	static Set<String> INVALID = new HashSet<>();
 
 	/**
 	 * Initialize the wrappers, if we haven't already.
@@ -460,7 +493,14 @@ public abstract class EnumWrappers {
 		SCOREBOARD_ACTION_CLASS = getEnum(PacketType.Play.Server.SCOREBOARD_SCORE.getPacketClass(), 0);
 		PARTICLE_CLASS = getEnum(PacketType.Play.Server.WORLD_PARTICLES.getPacketClass(), 0);
 		SOUND_CATEGORY_CLASS = getEnum(PacketType.Play.Server.CUSTOM_SOUND_EFFECT.getPacketClass(), 0);
-		ITEM_SLOT_CLASS = getEnum(PacketType.Play.Server.ENTITY_EQUIPMENT.getPacketClass(), 0);
+
+		try {
+			// TODO enum names are more stable than their packet associations
+			ITEM_SLOT_CLASS = MinecraftReflection.getMinecraftClass("EnumItemSlot");
+		} catch (Exception ex) {
+			ITEM_SLOT_CLASS = getEnum(PacketType.Play.Server.ENTITY_EQUIPMENT.getPacketClass(), 0);
+		}
+
 		HAND_CLASS = getEnum(PacketType.Play.Client.USE_ENTITY.getPacketClass(), 1);
 		DIRECTION_CLASS = getEnum(PacketType.Play.Server.SPAWN_ENTITY_PAINTING.getPacketClass(), 0);
 		CHAT_TYPE_CLASS = getEnum(PacketType.Play.Server.CHAT.getPacketClass(), 0);
@@ -487,7 +527,7 @@ public abstract class EnumWrappers {
 		associate(DIRECTION_CLASS, Direction.class, getDirectionConverter());
 		associate(CHAT_TYPE_CLASS, ChatType.class, getChatTypeConverter());
 		
-		if(ENTITY_POSE_CLASS != null) {
+		if (ENTITY_POSE_CLASS != null) {
 			associate(ENTITY_POSE_CLASS, EntityPose.class, getEntityPoseConverter());
 		}
 		
@@ -498,6 +538,8 @@ public abstract class EnumWrappers {
 		if (nativeClass != null) {
 			FROM_NATIVE.put(nativeClass, converter);
 			FROM_WRAPPER.put(wrapperClass, converter);
+		} else {
+			INVALID.add(wrapperClass.getSimpleName());
 		}
 	}
 
@@ -676,7 +718,7 @@ public abstract class EnumWrappers {
 	}
 
 	public static EquivalentConverter<PlayerDigType> getPlayerDiggingActionConverter() {
-		return new EnumConverter<>(getPlayerDigTypeClass(), PlayerDigType.class);
+		return new AliasedEnumConverter<>(getPlayerDigTypeClass(), PlayerDigType.class);
 	}
 
 	public static EquivalentConverter<PlayerAction> getEntityActionConverter() {
@@ -871,9 +913,9 @@ public abstract class EnumWrappers {
 			Validate.notNull(generic, "generic object cannot be null");
 
 			return lookup.computeIfAbsent(generic, x -> {
-				for (Field field : genericClass.getFields()) {
+				for (Field field : genericClass.getDeclaredFields()) {
 					try {
-						if (!field.isAccessible()) {
+						 if (!field.isAccessible()) {
 							field.setAccessible(true);
 						}
 

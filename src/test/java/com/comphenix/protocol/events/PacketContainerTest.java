@@ -30,6 +30,7 @@ import com.comphenix.protocol.utility.Util;
 import com.comphenix.protocol.wrappers.BlockPosition;
 import com.comphenix.protocol.wrappers.*;
 import com.comphenix.protocol.wrappers.EnumWrappers.SoundCategory;
+import com.comphenix.protocol.wrappers.MovingObjectPositionBlock;
 import com.comphenix.protocol.wrappers.WrappedDataWatcher.Registry;
 import com.comphenix.protocol.wrappers.WrappedDataWatcher.WrappedDataWatcherObject;
 import com.comphenix.protocol.wrappers.nbt.NbtCompound;
@@ -37,8 +38,9 @@ import com.comphenix.protocol.wrappers.nbt.NbtFactory;
 import com.google.common.collect.Lists;
 
 import net.md_5.bungee.api.chat.*;
-import net.minecraft.server.v1_15_R1.*;
-import net.minecraft.server.v1_15_R1.PacketPlayOutUpdateAttributes.AttributeSnapshot;
+import net.minecraft.server.v1_16_R2.*;
+import net.minecraft.server.v1_16_R2.MinecraftKey;
+import net.minecraft.server.v1_16_R2.PacketPlayOutUpdateAttributes.AttributeSnapshot;
 
 import org.apache.commons.lang.SerializationUtils;
 import org.apache.commons.lang.builder.EqualsBuilder;
@@ -51,6 +53,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.util.Vector;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -61,7 +64,7 @@ import static org.junit.Assert.*;
 
 // Ensure that the CraftItemFactory is mockable
 @RunWith(org.powermock.modules.junit4.PowerMockRunner.class)
-@PowerMockIgnore({ "org.apache.log4j.*", "org.apache.logging.*", "org.bukkit.craftbukkit.libs.jline.*" })
+@PowerMockIgnore({ "org.apache.log4j.*", "org.apache.logging.*", "org.bukkit.craftbukkit.libs.jline.*", "javax.management.*", "javax.xml.parsers.*", "com.sun.org.apache.xerces.internal.jaxp.*" })
 //@PrepareForTest(CraftItemFactory.class)
 public class PacketContainerTest {
 	// Helper converters
@@ -383,7 +386,8 @@ public class PacketContainerTest {
 		// are inner classes (which is ultimately pointless because AttributeSnapshots don't access any
 		// members of the packet itself)
 		PacketPlayOutUpdateAttributes packet = (PacketPlayOutUpdateAttributes) attribute.getHandle();
-		AttributeSnapshot snapshot = packet.new AttributeSnapshot("generic.Maxhealth", 20.0D, modifiers);
+		AttributeBase base = IRegistry.ATTRIBUTE.get(MinecraftKey.a("generic.max_health"));
+		AttributeSnapshot snapshot = packet.new AttributeSnapshot(base, 20.0D, modifiers);
 		attribute.getSpecificModifier(List.class).write(0, Lists.newArrayList(snapshot));
 
 		PacketContainer cloned = attribute.deepClone();
@@ -499,10 +503,66 @@ public class PacketContainerTest {
 	}
 
 	@Test
-	public void testDimensionManager() {
+	public void testDimensions() {
 		PacketContainer container = new PacketContainer(PacketType.Play.Server.RESPAWN);
 		container.getDimensions().write(0, 1);
 		assertEquals((Object) 1, container.getDimensions().read(0));
+	}
+
+	@Test
+	public void testEntityEquipment() {
+		PacketContainer container = new PacketContainer(PacketType.Play.Server.ENTITY_EQUIPMENT);
+
+		List<Pair<EnumWrappers.ItemSlot, ItemStack>> data = new ArrayList<>();
+		data.add(new Pair<>(EnumWrappers.ItemSlot.CHEST, new ItemStack(Material.NETHERITE_CHESTPLATE)));
+		data.add(new Pair<>(EnumWrappers.ItemSlot.LEGS, new ItemStack(Material.GOLDEN_LEGGINGS)));
+
+		container.getSlotStackPairLists().write(0, data);
+
+		List<Pair<EnumWrappers.ItemSlot, ItemStack>> written = container.getSlotStackPairLists().read(0);
+		assertEquals(data, written);
+	}
+
+	@Test
+	public void testMovingBlockPos() {
+		PacketContainer container = new PacketContainer(PacketType.Play.Client.USE_ITEM);
+
+		Vector vector = new Vector(0, 1, 2);
+		BlockPosition position = new BlockPosition(3, 4, 5);
+		EnumWrappers.Direction direction = EnumWrappers.Direction.DOWN;
+
+		MovingObjectPositionBlock movingPos = new MovingObjectPositionBlock(position, vector, direction, true);
+		container.getMovingBlockPositions().write(0, movingPos);
+
+		MovingObjectPositionBlock back = container.getMovingBlockPositions().read(0);
+
+		assertEquals(back.getPosVector(), vector);
+		assertEquals(back.getBlockPosition(), position);
+		assertEquals(back.getDirection(), direction);
+		assertTrue(back.isInsideBlock());
+	}
+
+	@Test
+	public void testMultiBlockChange() {
+		PacketContainer packet = new PacketContainer(PacketType.Play.Server.MULTI_BLOCK_CHANGE);
+
+		packet.getShortArrays().writeSafely(0, new short[] { 420, 69 });
+		assertArrayEquals(new short[] { 420, 69}, packet.getShortArrays().readSafely(0));
+
+		packet.getBlockDataArrays().writeSafely(0, new WrappedBlockData[] {
+				WrappedBlockData.createData(Material.IRON_BARS),
+				WrappedBlockData.createData(Material.IRON_BLOCK)
+		});
+		assertArrayEquals(new WrappedBlockData[] {
+				WrappedBlockData.createData(Material.IRON_BARS),
+				WrappedBlockData.createData(Material.IRON_BLOCK)
+		}, packet.getBlockDataArrays().readSafely(0));
+
+		packet.getSectionPositions().writeSafely(0, new BlockPosition(42, 43, 44));
+		assertEquals(new BlockPosition(42, 43, 44), packet.getSectionPositions().readSafely(0));
+
+		PacketContainer clone = packet.deepClone();
+		assertNotSame(clone, packet);
 	}
 
 	/**
@@ -535,7 +595,8 @@ public class PacketContainerTest {
 	public void testDeepClone() {
 		// Try constructing all the packets
 		for (PacketType type : PacketType.values()) {
-			if (type.isDeprecated() || type.name().contains("CUSTOM_PAYLOAD") || type.name().contains("TAGS") || !type.isSupported()) {
+			if (type.isDeprecated() || type.name().contains("CUSTOM_PAYLOAD") || type.name().contains("TAGS") || !type.isSupported()
+				|| type == PacketType.Play.Server.RECIPES) {
 				continue;
 			}
 

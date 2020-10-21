@@ -29,16 +29,14 @@ import javax.annotation.Nullable;
 import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.PacketType.Protocol;
 import com.comphenix.protocol.injector.StructureCache;
-import com.comphenix.protocol.reflect.EquivalentConverter;
-import com.comphenix.protocol.reflect.FuzzyReflection;
-import com.comphenix.protocol.reflect.ObjectWriter;
-import com.comphenix.protocol.reflect.StructureModifier;
+import com.comphenix.protocol.reflect.*;
 import com.comphenix.protocol.reflect.cloning.*;
 import com.comphenix.protocol.reflect.cloning.AggregateCloner.BuilderParameters;
 import com.comphenix.protocol.reflect.fuzzy.FuzzyMethodContract;
 import com.comphenix.protocol.reflect.instances.DefaultInstances;
 import com.comphenix.protocol.utility.MinecraftMethods;
 import com.comphenix.protocol.utility.MinecraftReflection;
+import com.comphenix.protocol.utility.MinecraftVersion;
 import com.comphenix.protocol.utility.StreamSerializer;
 import com.comphenix.protocol.wrappers.*;
 import com.comphenix.protocol.wrappers.EnumWrappers.*;
@@ -60,6 +58,7 @@ import org.bukkit.WorldType;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.MerchantRecipe;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
@@ -144,6 +143,11 @@ public class PacketContainer implements Serializable {
 		this.type = type;
 		this.handle = handle;
 		this.structureModifier = structure;
+
+		// TODO this is kinda hacky, come up with a better solution
+		if (type == PacketType.Play.Server.CHAT) {
+			getUUIDs().writeSafely(0, new UUID(0L, 0L));
+		}
 	}
 	
 	/**
@@ -290,7 +294,15 @@ public class PacketContainer implements Serializable {
 	public StructureModifier<int[]> getIntegerArrays() {
 		return structureModifier.withType(int[].class);
 	}
-	
+
+	/**
+	 * Retrieves a read/write structure for every short array field.
+	 * @return A modifier for every short array field.
+	 */
+	public StructureModifier<short[]> getShortArrays() {
+		return structureModifier.withType(short[].class);
+	}
+
 	/**
 	 * Retrieves a read/write structure for ItemStack.
 	 * <p>
@@ -577,7 +589,21 @@ public class PacketContainer implements Serializable {
 	public StructureModifier<WrappedBlockData> getBlockData() {
 		// Convert to and from our wrapper
 		return structureModifier.withType(
-				MinecraftReflection.getIBlockDataClass(), BukkitConverters.getWrappedBlockDataConverter());
+				MinecraftReflection.getIBlockDataClass(),
+				BukkitConverters.getWrappedBlockDataConverter()
+		);
+	}
+
+	/**
+	 * Retrieves a read/write structure for IBlockData arrays in Minecraft 1.16.2+
+	 * @return A modifier for IBlockData array fields
+	 */
+	public StructureModifier<WrappedBlockData[]> getBlockDataArrays() {
+		// TODO we might want to make this a lazy converter and only convert indexes as needed
+		return structureModifier.withType(
+				MinecraftReflection.getArrayClass(MinecraftReflection.getIBlockDataClass()),
+				Converters.array(MinecraftReflection.getIBlockDataClass(), BukkitConverters.getWrappedBlockDataConverter())
+		);
 	}
 
 	/**
@@ -592,7 +618,9 @@ public class PacketContainer implements Serializable {
 
 		// Convert to and from our wrapper
 		return structureModifier.withType(
-				MinecraftReflection.getMultiBlockChangeInfoArrayClass(), MultiBlockChangeInfo.getArrayConverter(chunk));
+				MinecraftReflection.getMultiBlockChangeInfoArrayClass(),
+				Converters.array(MinecraftReflection.getMultiBlockChangeInfoClass(), MultiBlockChangeInfo.getConverter(chunk))
+		);
 	}
 	
 	/**
@@ -915,15 +943,79 @@ public class PacketContainer implements Serializable {
     }
 
 	/**
-	 * Retrive a read/write structure for dimension IDs in 1.13.1+
+	 * Retrieve a read/write structure for dimension IDs in 1.13.1+
 	 * @return A modifier for dimension IDs
 	 */
 	public StructureModifier<Integer> getDimensions() {
+		if (MinecraftVersion.NETHER_UPDATE.atOrAbove() && !MinecraftVersion.NETHER_UPDATE_2.atOrAbove()) {
+			return structureModifier.withParamType(
+					MinecraftReflection.getMinecraftClass("ResourceKey"),
+					BukkitConverters.getDimensionIDConverter(),
+					MinecraftReflection.getMinecraftClass("DimensionManager")
+			);
+		} else {
+			return structureModifier.withType(
+					MinecraftReflection.getMinecraftClass("DimensionManager"),
+					BukkitConverters.getDimensionIDConverter()
+			);
+		}
+    }
+	
+	/**
+	 * Retrieve a read/write structure for the MerchantRecipeList class.
+	 * @return A modifier for MerchantRecipeList fields.
+	 */
+	public StructureModifier<List<MerchantRecipe>> getMerchantRecipeLists() {
 		return structureModifier.withType(
-				MinecraftReflection.getMinecraftClass("DimensionManager"),
-				BukkitConverters.getDimensionIDConverter()
+				MinecraftReflection.getMinecraftClass("MerchantRecipeList"),
+				BukkitConverters.getMerchantRecipeListConverter()
 		);
     }
+
+	/**
+	 * Retrieve a read/write structure for ItemSlot/ItemStack pair lists in 1.16+
+	 * @return The Structure Modifier
+	 */
+	public StructureModifier<List<Pair<ItemSlot, ItemStack>>> getSlotStackPairLists() {
+		return getLists(BukkitConverters.getPairConverter(
+				EnumWrappers.getItemSlotConverter(),
+				BukkitConverters.getItemStackConverter()
+		));
+	}
+
+	/**
+	 * Retrieve a read/write structure for MovingObjectPositionBlock in 1.16+
+	 * @return The Structure Modifier
+	 */
+	public StructureModifier<MovingObjectPositionBlock> getMovingBlockPositions() {
+		return structureModifier.withType(
+				MovingObjectPositionBlock.getNmsClass(),
+				MovingObjectPositionBlock.getConverter()
+		);
+	}
+
+	/**
+	 * Retrieve a read/write structure for World ResourceKeys in 1.16+
+	 * @return The Structure Modifier
+	 */
+	public StructureModifier<World> getWorldKeys() {
+		return structureModifier.withParamType(
+				MinecraftReflection.getMinecraftClass("ResourceKey"),
+				BukkitConverters.getWorldKeyConverter(),
+				MinecraftReflection.getNmsWorldClass()
+		);
+	}
+
+	/**
+	 * Retrieve a read/write structure for SectionPositions in 1.16.2+
+	 * @return The Structure Modifier
+	 */
+	public StructureModifier<BlockPosition> getSectionPositions() {
+		return structureModifier.withType(
+				MinecraftReflection.getMinecraftClass("SectionPosition"),
+				BukkitConverters.getSectionPositionConverter()
+		);
+	}
 
 	/**
 	 * Retrieve a read/write structure for the Map class.

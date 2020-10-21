@@ -16,14 +16,17 @@
  */
 package com.comphenix.protocol.wrappers;
 
+import java.lang.reflect.Array;
 import java.util.function.Function;
 
 import com.comphenix.protocol.reflect.EquivalentConverter;
+import com.comphenix.protocol.utility.MinecraftReflection;
 
 /**
  * Utility class for converters
  * @author dmulloy2
  */
+@SuppressWarnings("unchecked")
 public class Converters {
 
 	/**
@@ -85,7 +88,7 @@ public class Converters {
 	 * @return A handle converter
 	 */
 	public static <T> EquivalentConverter<T> handle(final Function<T, Object> toHandle,
-	                                                final Function<Object, T> fromHandle) {
+			final Function<Object, T> fromHandle, final Class<T> specificType) {
 		return new EquivalentConverter<T>() {
 			@Override
 			public T getSpecific(Object generic) {
@@ -99,7 +102,51 @@ public class Converters {
 
 			@Override
 			public Class<T> getSpecificType() {
-				return null;
+				return specificType;
+			}
+		};
+	}
+
+	/**
+	 * Creates a generic array converter. Converts a NMS object array to and from a wrapper array by converting
+	 * each element individually.
+	 *
+	 * @param nmsClass NMS class
+	 * @param converter Underlying converter
+	 * @param <T> Generic type
+	 * @return An array converter
+	 */
+	public static <T> EquivalentConverter<T[]> array(final Class<?> nmsClass, final EquivalentConverter<T> converter) {
+		return new EquivalentConverter<T[]>() {
+			@Override
+			public T[] getSpecific(Object generic) {
+				Object[] array = (Object[]) generic;
+				Class<T[]> clazz = getSpecificType();
+				T[] result = clazz.cast(Array.newInstance(clazz.getComponentType(), array.length));
+
+				// Unwrap every item
+				for (int i = 0; i < result.length; i++) {
+					result[i] = converter.getSpecific(array[i]);
+				}
+
+				return result;
+			}
+
+			@Override
+			public Object getGeneric(T[] specific) {
+				Object[] result = (Object[]) Array.newInstance(nmsClass, specific.length);
+
+				// Wrap every item
+				for (int i = 0; i < result.length; i++) {
+					result[i] = converter.getGeneric(specific[i]);
+				}
+
+				return result;
+			}
+
+			@Override
+			public Class<T[]> getSpecificType() {
+				return (Class<T[]>) MinecraftReflection.getArrayClass(converter.getSpecificType());
 			}
 		};
 	}
